@@ -266,6 +266,12 @@ importers:
       '@qdrant/js-client-rest':
         specifier: ^1.14.0
         version: 1.14.1(typescript@5.8.3)
+      '@roo-code/cloud':
+        specifier: workspace:^
+        version: link:../packages/cloud
+      '@roo-code/telemetry':
+        specifier: workspace:^
+        version: link:../packages/telemetry
       '@roo-code/types':
         specifier: workspace:^
         version: link:../packages/types

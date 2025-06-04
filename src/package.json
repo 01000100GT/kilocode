@@ -434,6 +434,8 @@
 		"@mistralai/mistralai": "^1.6.0",
 		"@modelcontextprotocol/sdk": "^1.9.0",
 		"@qdrant/js-client-rest": "^1.14.0",
+		"@roo-code/cloud": "workspace:^",
+		"@roo-code/telemetry": "workspace:^",
 		"@roo-code/types": "workspace:^",
 		"@types/lodash.debounce": "^4.0.9",
 		"@types/lru-cache": "^7.10.9",
