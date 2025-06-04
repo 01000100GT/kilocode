@@ -99,7 +99,7 @@ class WorkspaceTracker {
 			if (this.prevWorkSpacePath !== this.cwd) {
 				await this.providerRef.deref()?.postMessageToWebview({
 					type: "workspaceUpdated",
-					filePaths: [],
+					files: [],
 					openedTabs: this.getOpenedTabsInfo(),
 				})
 				this.filePaths.clear()
@@ -121,7 +121,7 @@ class WorkspaceTracker {
 			const relativeFilePaths = Array.from(this.filePaths).map((file) => toRelativePath(file, this.cwd))
 			this.providerRef.deref()?.postMessageToWebview({
 				type: "workspaceUpdated",
-				filePaths: relativeFilePaths,
+				files: relativeFilePaths,
 				openedTabs: this.getOpenedTabsInfo(),
 			})
 			this.updateTimer = null

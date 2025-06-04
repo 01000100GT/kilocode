@@ -4,22 +4,19 @@ import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 import axios from "axios" // kilocode_change
 
-import { type Language, type ProviderSettings, type GlobalState, TelemetryEventName } from "@roo-code/types"
-import { CloudService } from "@roo-code/cloud"
-import { TelemetryService } from "@roo-code/telemetry"
+import type { Language, ProviderSettings, GlobalState } from "@roo-code/types"
 
 import { ClineProvider } from "./ClineProvider"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { RouterName, toRouterName, ModelRecord } from "../../shared/api"
 import { supportPrompt } from "../../shared/support-prompt"
-
 import { checkoutDiffPayloadSchema, checkoutRestorePayloadSchema, WebviewMessage } from "../../shared/WebviewMessage"
 import { checkExistKey } from "../../shared/checkExistApiConfig"
 import { experimentDefault } from "../../shared/experiments"
 import { Terminal } from "../../integrations/terminal/Terminal"
 import { openFile, openImage } from "../../integrations/misc/open-file"
-import { selectImages } from "../../integrations/misc/process-images"
+import { selectFiles } from "../../integrations/misc/process-files"
 import { getTheme } from "../../integrations/theme/getTheme"
 import { discoverChromeHostUrl, tryChromeHostUrl } from "../../services/browser/browserDiscovery"
 import { searchWorkspaceFiles } from "../../services/search/file-search"
@@ -32,8 +29,9 @@ import { exportSettings, importSettings } from "../config/importExport"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getOllamaModels } from "../../api/providers/ollama"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
-import { getLmStudioModels } from "../../api/providers/lm-studio"
+import { getLmStudioModels } from "../../api/providers/lmstudio"
 import { openMention } from "../mentions"
+import { telemetryService } from "../../services/telemetry"
 import { TelemetrySetting } from "../../shared/TelemetrySetting"
 import { getWorkspacePath } from "../../utils/path"
 import { Mode, defaultModeSlug } from "../../shared/modes"
@@ -127,7 +125,7 @@ export const webviewMessageHandler = async (provider: ClineProvider, message: We
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
 			// task. This essentially creates a fresh slate for the new task.
-			await provider.initClineWithTask(message.text, message.images)
+			await provider.initClineWithTask(message.text, message.images, message.files)
 			break
 		// kilocode_change start
 		case "condense":
@@ -178,11 +176,9 @@ export const webviewMessageHandler = async (provider: ClineProvider, message: We
 			await provider.postStateToWebview()
 			break
 		case "askResponse":
-			provider.getCurrentCline()?.handleWebviewAskResponse(message.askResponse!, message.text, message.images)
-			break
-		case "autoCondenseContext":
-			await updateGlobalState("autoCondenseContext", message.bool)
-			await provider.postStateToWebview()
+			provider
+				.getCurrentCline()
+				?.handleWebviewAskResponse(message.askResponse!, message.text, message.images, message.files)
 			break
 		case "autoCondenseContextPercent":
 			await updateGlobalState("autoCondenseContextPercent", message.value)
@@ -203,8 +199,8 @@ export const webviewMessageHandler = async (provider: ClineProvider, message: We
 			await provider.postStateToWebview()
 			break
 		case "selectImages":
-			const images = await selectImages()
-			await provider.postMessageToWebview({ type: "selectedImages", images })
+			const { images, files } = await selectFiles()
+			await provider.postMessageToWebview({ type: "selectedImages", images, files })
 			break
 		case "exportCurrentTask":
 			const currentTaskId = provider.getCurrentCline()?.taskId
@@ -328,10 +324,7 @@ export const webviewMessageHandler = async (provider: ClineProvider, message: We
 				{ key: "requesty", options: { provider: "requesty", apiKey: apiConfiguration.requestyApiKey } },
 				{ key: "glama", options: { provider: "glama" } },
 				{ key: "unbound", options: { provider: "unbound", apiKey: apiConfiguration.unboundApiKey } },
-				{
-					key: "kilocode-openrouter",
-					options: { provider: "kilocode-openrouter", kilocodeToken: apiConfiguration.kilocodeToken },
-				}, // kilocode_change
+				{ key: "kilocode-openrouter", options: { provider: "kilocode-openrouter" } }, // kilocode_change
 			]
 
 			const litellmApiKey = apiConfiguration.litellmApiKey || message?.values?.litellmApiKey
@@ -997,11 +990,6 @@ export const webviewMessageHandler = async (provider: ClineProvider, message: We
 			await provider.postStateToWebview()
 			break
 		// kilocode_change end
-		case "maxConcurrentFileReads":
-			const valueToSave = message.value // Capture the value intended for saving
-			await updateGlobalState("maxConcurrentFileReads", valueToSave)
-			await provider.postStateToWebview()
-			break
 		case "setHistoryPreviewCollapsed": // Add the new case handler
 			await updateGlobalState("historyPreviewCollapsed", message.bool ?? false)
 			// No need to call postStateToWebview here as the UI already updated optimistically
@@ -1061,7 +1049,10 @@ export const webviewMessageHandler = async (provider: ClineProvider, message: We
 						supportPrompt.create("ENHANCE", { userInput: message.text }, customSupportPrompts),
 					)
 
-					await provider.postMessageToWebview({ type: "enhancedPrompt", text: enhancedPrompt })
+					await provider.postMessageToWebview({
+						type: "enhancedPrompt",
+						text: enhancedPrompt,
+					})
 				} catch (error) {
 					provider.log(
 						`Error enhancing prompt: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -1494,45 +1485,6 @@ export const webviewMessageHandler = async (provider: ClineProvider, message: We
 			provider.getCurrentCline()?.handleWebviewAskResponse("yesButtonClicked")
 			break
 		// end kilocode_change
-		case "telemetrySetting": {
-			const telemetrySetting = message.text as TelemetrySetting
-			await updateGlobalState("telemetrySetting", telemetrySetting)
-			// kilocode_change: do not get instance
-			// const isOptedIn = telemetrySetting === "enabled"
-
-			// TelemetryService.instance.updateTelemetryState(isOptedIn)
-			await provider.postStateToWebview()
-			break
-		}
-		case "accountButtonClicked": {
-			// Navigate to the account tab.
-			provider.postMessageToWebview({ type: "action", action: "accountButtonClicked" })
-			break
-		}
-		case "rooCloudSignIn": {
-			try {
-				// kilocode_change: do not get instance
-				// TelemetryService.instance.captureEvent(TelemetryEventName.AUTHENTICATION_INITIATED)
-				await CloudService.instance.login()
-			} catch (error) {
-				provider.log(`AuthService#login failed: ${error}`)
-				vscode.window.showErrorMessage("Sign in failed.")
-			}
-
-			break
-		}
-		case "rooCloudSignOut": {
-			try {
-				await CloudService.instance.logout()
-				await provider.postStateToWebview()
-				provider.postMessageToWebview({ type: "authenticatedUser", userInfo: undefined })
-			} catch (error) {
-				provider.log(`AuthService#logout failed: ${error}`)
-				vscode.window.showErrorMessage("Sign out failed.")
-			}
-
-			break
-		}
 		case "codebaseIndexConfig": {
 			const codebaseIndexConfig = message.values ?? {
 				codebaseIndexEnabled: false,

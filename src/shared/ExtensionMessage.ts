@@ -94,7 +94,7 @@ export interface ExtensionMessage {
 	invoke?: "newChat" | "sendMessage" | "primaryButtonClick" | "secondaryButtonClick" | "setChatBoxMessage"
 	state?: ExtensionState
 	images?: string[]
-	filePaths?: string[]
+	files?: string[]
 	openedTabs?: Array<{
 		label: string
 		isActive: boolean

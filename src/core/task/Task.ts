@@ -113,6 +113,7 @@ export type TaskOptions = {
 	consecutiveMistakeLimit?: number
 	task?: string
 	images?: string[]
+	files?: string[]
 	historyItem?: HistoryItem
 	experiments?: Record<string, boolean>
 	startTask?: boolean
@@ -175,6 +176,7 @@ export class Task extends EventEmitter<ClineEvents> {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	private askResponseFiles?: string[]
 	public lastMessageTs?: number
 
 	// Tool Use
@@ -211,6 +213,7 @@ export class Task extends EventEmitter<ClineEvents> {
 		consecutiveMistakeLimit = 3,
 		task,
 		images,
+		files,
 		historyItem,
 		startTask = true,
 		rootTask,
@@ -221,8 +224,8 @@ export class Task extends EventEmitter<ClineEvents> {
 		super()
 		this.context = context // kilocode_change
 
-		if (startTask && !task && !images && !historyItem) {
-			throw new Error("Either historyItem or task/images must be provided")
+		if (startTask && !task && !images && !files && !historyItem) {
+			throw new Error("Either historyItem or task/images/files must be provided")
 		}
 
 		this.taskId = historyItem ? historyItem.id : crypto.randomUUID()
@@ -263,12 +266,12 @@ export class Task extends EventEmitter<ClineEvents> {
 		onCreated?.(this)
 
 		if (startTask) {
-			if (task || images) {
-				this.startTask(task, images)
+			if (task || images || files) {
+				this.startTask(task, images, files)
 			} else if (historyItem) {
 				this.resumeTaskFromHistory()
 			} else {
-				throw new Error("Either historyItem or task/images must be provided")
+				throw new Error("Either historyItem or task/images/files must be provided")
 			}
 		}
 	}
@@ -285,15 +288,15 @@ export class Task extends EventEmitter<ClineEvents> {
 
 	static create(options: TaskOptions): [Task, Promise<void>] {
 		const instance = new Task({ ...options, startTask: false })
-		const { images, task, historyItem } = options
+		const { images, task, historyItem, files } = options
 		let promise
 
-		if (images || task) {
-			promise = instance.startTask(task, images)
+		if (images || task || files) {
+			promise = instance.startTask(task, images, files)
 		} else if (historyItem) {
 			promise = instance.resumeTaskFromHistory()
 		} else {
-			throw new Error("Either historyItem or task/images must be provided")
+			throw new Error("Either historyItem or task/images/files must be provided")
 		}
 
 		return [instance, promise]
@@ -404,7 +407,7 @@ export class Task extends EventEmitter<ClineEvents> {
 		text?: string,
 		partial?: boolean,
 		progressStatus?: ToolProgressStatus,
-	): Promise<{ response: ClineAskResponse; text?: string; images?: string[] }> {
+	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; files?: string[] }> {
 		// If this Cline instance was aborted by the provider, then the only
 		// thing keeping us alive is a promise still running in the background,
 		// in which case we don't want to send its result to the webview as it
@@ -452,6 +455,7 @@ export class Task extends EventEmitter<ClineEvents> {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseFiles = undefined
 
 					// Bug for the history books:
 					// In the webview we use the ts as the chatrow key for the
@@ -476,6 +480,7 @@ export class Task extends EventEmitter<ClineEvents> {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseFiles = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
 					await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text })
@@ -486,6 +491,7 @@ export class Task extends EventEmitter<ClineEvents> {
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
+			this.askResponseFiles = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
 			await this.addToClineMessages({ ts: askTs, type: "ask", ask: type, text })
@@ -500,18 +506,25 @@ export class Task extends EventEmitter<ClineEvents> {
 			throw new Error("Current ask promise was ignored")
 		}
 
-		const result = { response: this.askResponse!, text: this.askResponseText, images: this.askResponseImages }
+		const result = {
+			response: this.askResponse!,
+			text: this.askResponseText,
+			images: this.askResponseImages,
+			files: this.askResponseFiles,
+		}
 		this.askResponse = undefined
 		this.askResponseText = undefined
 		this.askResponseImages = undefined
+		this.askResponseFiles = undefined
 		this.emit("taskAskResponded")
 		return result
 	}
 
-	async handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
+	async handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[], files?: string[]) {
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+		this.askResponseFiles = files
 	}
 
 	async handleTerminalOperation(terminalOperation: "continue" | "abort") {
@@ -583,6 +596,7 @@ export class Task extends EventEmitter<ClineEvents> {
 			"condense_context",
 			undefined /* text */,
 			undefined /* images */,
+			undefined /* files */,
 			false /* partial */,
 			undefined /* checkpoint */,
 			undefined /* progressStatus */,
@@ -595,6 +609,7 @@ export class Task extends EventEmitter<ClineEvents> {
 		type: ClineSay,
 		text?: string,
 		images?: string[],
+		files?: string[], // kilocode_change
 		partial?: boolean,
 		checkpoint?: Record<string, unknown>,
 		progressStatus?: ToolProgressStatus,
@@ -618,6 +633,7 @@ export class Task extends EventEmitter<ClineEvents> {
 					// Existing partial message, so update it.
 					lastMessage.text = text
 					lastMessage.images = images
+					lastMessage.files = files
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
 					this.updateClineMessage(lastMessage)
@@ -635,6 +651,7 @@ export class Task extends EventEmitter<ClineEvents> {
 						say: type,
 						text,
 						images,
+						files,
 						partial,
 						contextCondense,
 					})
@@ -650,6 +667,7 @@ export class Task extends EventEmitter<ClineEvents> {
 
 					lastMessage.text = text
 					lastMessage.images = images
+					lastMessage.files = files
 					lastMessage.partial = false
 					lastMessage.progressStatus = progressStatus
 
@@ -688,6 +706,7 @@ export class Task extends EventEmitter<ClineEvents> {
 				say: type,
 				text,
 				images,
+				files,
 				checkpoint,
 				contextCondense,
 			})
@@ -706,7 +725,7 @@ export class Task extends EventEmitter<ClineEvents> {
 
 	// Start / Abort / Resume
 
-	private async startTask(task?: string, images?: string[]): Promise<void> {
+	private async startTask(task?: string, images?: string[], files?: string[]): Promise<void> {
 		// `conversationHistory` (for API) and `clineMessages` (for webview)
 		// need to be in sync.
 		// If the extension process were killed, then on restart the
@@ -717,11 +736,10 @@ export class Task extends EventEmitter<ClineEvents> {
 		this.apiConversationHistory = []
 		await this.providerRef.deref()?.postStateToWebview()
 
-		await this.say("text", task, images)
+		await this.say("text", task, images, files)
 		this.isInitialized = true
 
 		let imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
-
 		console.log(`[subtasks] task ${this.taskId}.${this.instanceId} starting`)
 
 		await this.initiateTaskLoop([
@@ -1300,7 +1318,7 @@ export class Task extends EventEmitter<ClineEvents> {
 					switch (chunk.type) {
 						case "reasoning":
 							reasoningMessage += chunk.text
-							await this.say("reasoning", reasoningMessage, undefined, true)
+							await this.say("reasoning", reasoningMessage, undefined, undefined, true)
 							break
 						case "usage":
 							inputTokens += chunk.inputTokens
@@ -1688,7 +1706,7 @@ export class Task extends EventEmitter<ClineEvents> {
 			// Show countdown timer
 			for (let i = rateLimitDelay; i > 0; i--) {
 				const delayMessage = `Rate limiting for ${i} seconds...`
-				await this.say("api_req_retry_delayed", delayMessage, undefined, true)
+				await this.say("api_req_retry_delayed", delayMessage, undefined, undefined, true)
 				await delay(1000)
 			}
 		}
@@ -1737,6 +1755,7 @@ export class Task extends EventEmitter<ClineEvents> {
 					"condense_context",
 					undefined /* text */,
 					undefined /* images */,
+					undefined /* files */,
 					false /* partial */,
 					undefined /* checkpoint */,
 					undefined /* progressStatus */,
@@ -1842,6 +1861,7 @@ export class Task extends EventEmitter<ClineEvents> {
 						"api_req_retry_delayed",
 						`${errorMsg}\n\nRetry attempt ${retryAttempt + 1}\nRetrying in ${i} seconds...`,
 						undefined,
+						undefined,
 						true,
 					)
 					await delay(1000)
@@ -1850,6 +1870,7 @@ export class Task extends EventEmitter<ClineEvents> {
 				await this.say(
 					"api_req_retry_delayed",
 					`${errorMsg}\n\nRetry attempt ${retryAttempt + 1}\nRetrying now...`,
+					undefined,
 					undefined,
 					false,
 				)
