@@ -583,6 +583,7 @@ export class Task extends EventEmitter<ClineEvents> {
 				"condense_context_error",
 				error,
 				undefined /* images */,
+				undefined /* files */,
 				false /* partial */,
 				undefined /* checkpoint */,
 				undefined /* progressStatus */,
